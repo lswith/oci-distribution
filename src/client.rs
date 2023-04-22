@@ -322,7 +322,7 @@ impl Client {
     pub async fn push(
         &mut self,
         image_ref: &Reference,
-        layers: &[ImageLayer],
+        layers: Vec<ImageLayer>,
         config: Config,
         auth: &RegistryAuth,
         manifest: Option<OciImageManifest>,
@@ -335,7 +335,7 @@ impl Client {
 
         let manifest: OciImageManifest = match manifest {
             Some(m) => m,
-            None => OciImageManifest::build(layers, &config, None),
+            None => OciImageManifest::build(layers.as_ref(), &config, None),
         };
 
         // Upload layers
