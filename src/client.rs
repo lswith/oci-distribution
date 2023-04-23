@@ -31,7 +31,7 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio_util::compat::FuturesAsyncReadCompatExt;
-use tracing::{debug, trace, warn};
+use tracing::{debug, error, trace, warn};
 
 const MIME_TYPES_DISTRIBUTION_MANIFEST: &[&str] = &[
     IMAGE_MANIFEST_MEDIA_TYPE,
@@ -291,7 +291,7 @@ impl Client {
         self.validate_layers(&manifest, accepted_media_types)
             .await?;
 
-        let layers = stream::iter(&manifest.layers)
+        let layers = stream::iter(manifest.layers.clone())
             .map(|layer| {
                 // This avoids moving `self` which is &mut Self
                 // into the async block. We only want to capture
@@ -514,7 +514,10 @@ impl Client {
             }
             _ => {
                 let reason = auth_res.text().await?;
-                debug!("Failed to authenticate for image '{:?}': {}", image, reason);
+                let query_str = query
+                    .iter()
+                    .fold(String::new(), |a, (k, v)| format!("{}&{}={}", a, k, v));
+                error!(realm, query = query_str, image = ?image, reason, "Failed to authenticate for image");
                 Err(OciDistributionError::AuthenticationFailure(reason))
             }
         }
@@ -2341,9 +2344,12 @@ mod test {
             .await
             .expect("authenticated");
 
+        let layers_len = image_data.layers.len();
+        let layer_1_data_len = image_data.layers[0].data.len();
+        let layer_1_data = image_data.layers[0].data.clone();
         c.push(
             &push_image,
-            &image_data.layers,
+            image_data.layers,
             image_data.config.clone(),
             registry_auth,
             Some(manifest.clone()),
@@ -2365,13 +2371,10 @@ mod test {
             .await
             .expect("failed to pull pushed image manifest");
 
-        assert!(image_data.layers.len() == 1);
+        assert!(layers_len == 1);
         assert!(pulled_image_data.layers.len() == 1);
-        assert_eq!(
-            image_data.layers[0].data.len(),
-            pulled_image_data.layers[0].data.len()
-        );
-        assert_eq!(image_data.layers[0].data, pulled_image_data.layers[0].data);
+        assert_eq!(layer_1_data_len, pulled_image_data.layers[0].data.len());
+        assert_eq!(layer_1_data, pulled_image_data.layers[0].data);
 
         assert_eq!(manifest.media_type, pulled_manifest.media_type);
         assert_eq!(manifest.schema_version, pulled_manifest.schema_version);
@@ -2450,7 +2453,7 @@ mod test {
         } = image;
         c.push(
             &dest_image,
-            &layers,
+            layers,
             config,
             &RegistryAuth::Anonymous,
             manifest,
