@@ -31,7 +31,7 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio_util::compat::FuturesAsyncReadCompatExt;
-use tracing::{debug, trace, warn};
+use tracing::{debug, error, trace, warn};
 
 const MIME_TYPES_DISTRIBUTION_MANIFEST: &[&str] = &[
     IMAGE_MANIFEST_MEDIA_TYPE,
@@ -281,7 +281,7 @@ impl Client {
         self.validate_layers(&manifest, accepted_media_types)
             .await?;
 
-        let layers = stream::iter(&manifest.layers)
+        let layers = stream::iter(manifest.layers.clone())
             .map(|layer| {
                 // This avoids moving `self` which is &mut Self
                 // into the async block. We only want to capture
@@ -504,7 +504,10 @@ impl Client {
             }
             _ => {
                 let reason = auth_res.text().await?;
-                debug!("Failed to authenticate for image '{:?}': {}", image, reason);
+                let query_str = query
+                    .iter()
+                    .fold(String::new(), |a, (k, v)| format!("{}&{}={}", a, k, v));
+                error!(realm, query = query_str, image = ?image, reason, "Failed to authenticate for image");
                 Err(OciDistributionError::AuthenticationFailure(reason))
             }
         }
